@@ -2,50 +2,123 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
 const generateToken = (userId) => {
-    return jwt.sign({id : userId}, process.env.JWT_SECRET, {expiresIn : "7d"});
-}
+    return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: "7d" });
+};
 
-2) register(req, res) logic
-Write in this exact flow:
+const sanitizeUser = (user) => ({
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+});
 
-const { name, email, password } = req.body
-If any missing -> 400
-Check existing user by lowercase email
-If exists -> 409
-Create user (password auto-hashed by model hook)
-Generate token using new user id
-Return 201 with { user, token } (never password)
-Key thinking:
+const register = async (req, res) => {
+    try {
+        const { name, email, password } = req.body;
 
-register fails fast
-no duplicate email
-never leak full user object
-
-const register = async (req,res) => {okay 
-    try{
-        const {name, email, password} = req.body;
-
-        if(!name || !email || !password){
+        if (!name || !email || !password) {
             return res.status(400).json({
-                success : false,
-                message : "Name,email and password are required!";
+                success: false,
+                message: "Name, email, and password are required.",
             });
         }
 
-        const existingUser = await User.findOne({email : email.toLowerCase()});
-        if(existingUser){
-            return res,status(409).json({
-                success : false,
-                message : "User already exists!";
-            })
+        const normalizedEmail = email.toLowerCase();
+        const existingUser = await User.findOne({ email: normalizedEmail });
+
+        if (existingUser) {
+            return res.status(409).json({
+                success: false,
+                message: "User already exists.",
+            });
         }
 
-        const user : await User.create({
+        const user = await User.create({
             name,
-            
-        })
+            email: normalizedEmail,
+            password,
+        });
 
-    } catch(error) {
+        const token = generateToken(user._id);
 
+        return res.status(201).json({
+            success: true,
+            message: "User registered successfully.",
+            data: {
+                user: sanitizeUser(user),
+                token,
+            },
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Registration failed.",
+        });
     }
+};
+
+const login = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: "Email and password are required.",
+            });
+        }
+
+        const user = await User.findOne({ email: email.toLowerCase() }).select(
+            "+password"
+        );
+
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid credentials.",
+            });
+        }
+
+        const isPasswordValid = await user.matchPassword(password);
+
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid credentials.",
+            });
+        }
+
+        const token = generateToken(user._id);
+
+        return res.status(200).json({
+            success: true,
+            message: "Login successful.",
+            data: {
+                user: sanitizeUser(user),
+                token,
+            },
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Login failed.",
+        });
+    }
+};
+
+const me = async (req, res) => {
+    return res.status(200).json({
+        success: true,
+        message: "Current user fetched successfully.",
+        data: {
+            user: sanitizeUser(req.user),
+        },
+    });
+};
+
+module.exports = {
+    register,
+    login,
+    me,
 };
